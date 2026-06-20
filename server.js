@@ -1,0 +1,263 @@
+const express = require('express');
+const cors = require('cors');
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
+const QRCode = require('qrcode');
+const path = require('path');
+const fs = require('fs');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+// DB setup
+const dbDir = path.join(__dirname, 'db');
+if (!fs.existsSync(dbDir)) fs.mkdirSync(dbDir, { recursive: true });
+const dbPath = path.join(dbDir, 'db.json');
+if (!fs.existsSync(dbPath)) fs.writeFileSync(dbPath, '{}');
+const adapter = new FileSync(dbPath);
+const db = low(adapter);
+db.defaults({ menu: [], orders: [], bills: [], nextOrderId: 1, nextBillId: 1 }).write();
+
+// Seed menu if empty
+if (db.get('menu').size().value() === 0) {
+  db.get('menu').push(
+    { id: 1, category: 'Hot Drinks', name: 'Espresso', desc: 'Double shot, rich & bold', price: 120 },
+    { id: 2, category: 'Hot Drinks', name: 'Cappuccino', desc: 'Espresso, steamed milk & foam', price: 180 },
+    { id: 3, category: 'Hot Drinks', name: 'Masala Chai', desc: 'Spiced Indian tea with milk', price: 100 },
+    { id: 4, category: 'Hot Drinks', name: 'Filter Coffee', desc: 'South Indian style, decoction', price: 90 },
+    { id: 5, category: 'Cold Drinks', name: 'Cold Brew', desc: '18-hour steeped, smooth finish', price: 220 },
+    { id: 6, category: 'Cold Drinks', name: 'Mango Smoothie', desc: 'Alphonso mango, yogurt blend', price: 200 },
+    { id: 7, category: 'Food', name: 'Butter Croissant', desc: 'Freshly baked, flaky layers', price: 150 },
+    { id: 8, category: 'Food', name: 'Veg Sandwich', desc: 'Grilled with cheese & veggies', price: 200 },
+    { id: 9, category: 'Food', name: 'Banana Bread', desc: 'Moist slice, walnuts & honey', price: 130 },
+    { id: 10, category: 'Food', name: 'Avocado Toast', desc: 'Multigrain, chilli flakes', price: 250 }
+  ).write();
+}
+
+app.use(cors());
+app.use(express.json());
+app.use(express.static(path.join(__dirname, 'public')));
+
+// --- API ROUTES ---
+
+// Get menu
+app.get('/api/menu', (req, res) => {
+  res.json(db.get('menu').value());
+});
+
+// Place order
+app.post('/api/orders', (req, res) => {
+  const { table, items, type } = req.body;
+  if (!table) return res.status(400).json({ error: 'Table number required' });
+  const id = db.get('nextOrderId').value();
+  const order = {
+    id,
+    table,
+    items: items || [],
+    total: (items || []).reduce((s, i) => s + i.price * i.qty, 0),
+    type: type || 'order',
+    status: type === 'waiter' ? 'waiter' : 'new',
+    time: new Date().toISOString()
+  };
+  db.get('orders').push(order).write();
+  db.set('nextOrderId', id + 1).write();
+  res.json({ success: true, order });
+});
+
+// Get all orders (dashboard)
+app.get('/api/orders', (req, res) => {
+  const orders = db.get('orders').value().slice().reverse();
+  res.json(orders);
+});
+
+// Update order status
+app.patch('/api/orders/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  const { status } = req.body;
+  db.get('orders').find({ id }).assign({ status }).write();
+  res.json({ success: true });
+});
+
+// Delete/clear order
+app.delete('/api/orders/:id', (req, res) => {
+  db.get('orders').remove({ id: parseInt(req.params.id) }).write();
+  res.json({ success: true });
+});
+
+// Update menu item
+app.patch('/api/menu/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  db.get('menu').find({ id }).assign(req.body).write();
+  res.json({ success: true });
+});
+
+// Add menu item
+app.post('/api/menu', (req, res) => {
+  const items = db.get('menu').value();
+  const newId = items.length ? Math.max(...items.map(i => i.id)) + 1 : 1;
+  const item = { id: newId, ...req.body };
+  db.get('menu').push(item).write();
+  res.json({ success: true, item });
+});
+
+// Delete menu item
+app.delete('/api/menu/:id', (req, res) => {
+  db.get('menu').remove({ id: parseInt(req.params.id) }).write();
+  res.json({ success: true });
+});
+
+// Get a specific bill (for printing/reprinting)
+app.get('/api/bill/receipt/:id', (req, res) => {
+  const bill = db.get('bills').find({ id: parseInt(req.params.id) }).value();
+  if (!bill) return res.status(404).json({ error: 'Bill not found' });
+  res.json(bill);
+});
+
+// Get all non-billed orders for a table (for generating a combined bill)
+app.get('/api/bill/:table', (req, res) => {
+  const table = req.params.table;
+  const orders = db.get('orders')
+    .filter(o => String(o.table) === String(table) && o.type === 'order' && o.status !== 'billed')
+    .value();
+  res.json(orders);
+});
+
+// Generate a bill: combine selected orders, apply discount, mark as billed
+app.post('/api/bill', (req, res) => {
+  const { table, orderIds, discountType, discountValue, time } = req.body;
+  if (!table || !orderIds || orderIds.length === 0) {
+    return res.status(400).json({ error: 'Table and at least one order required' });
+  }
+
+  const orders = db.get('orders').filter(o => orderIds.includes(o.id)).value();
+  const allItems = orders.flatMap(o => o.items);
+  const subtotal = allItems.reduce((s, i) => s + i.price * i.qty, 0);
+
+  let discountAmount = 0;
+  if (discountType === 'percent') {
+    discountAmount = Math.round(subtotal * (parseFloat(discountValue) || 0) / 100);
+  } else if (discountType === 'flat') {
+    discountAmount = Math.min(parseFloat(discountValue) || 0, subtotal);
+  }
+
+  const finalTotal = subtotal - discountAmount;
+
+  const billId = db.get('nextBillId').value() || 1;
+  const bill = {
+    id: billId,
+    table,
+    orderIds,
+    items: allItems,
+    subtotal,
+    discountType: discountType || 'none',
+    discountValue: discountValue || 0,
+    discountAmount,
+    finalTotal,
+    // Use staff-provided time if given (must be valid date), otherwise now
+    time: (time && !isNaN(new Date(time).getTime())) ? new Date(time).toISOString() : new Date().toISOString()
+  };
+
+  db.get('bills').push(bill).write();
+  db.set('nextBillId', billId + 1).write();
+
+  // Mark those orders as billed so they don't show up again
+  orderIds.forEach(id => {
+    db.get('orders').find({ id }).assign({ status: 'billed' }).write();
+  });
+
+  res.json({ success: true, bill });
+});
+
+// Edit an existing bill's date/time
+app.patch('/api/bill/:id', (req, res) => {
+  const id = parseInt(req.params.id);
+  const { time } = req.body;
+  if (!time || isNaN(new Date(time).getTime())) {
+    return res.status(400).json({ error: 'Valid time required' });
+  }
+  const bill = db.get('bills').find({ id }).value();
+  if (!bill) return res.status(404).json({ error: 'Bill not found' });
+  db.get('bills').find({ id }).assign({ time: new Date(time).toISOString() }).write();
+  res.json({ success: true, bill: db.get('bills').find({ id }).value() });
+});
+
+// Get full bill/order history with optional filters (date range, table)
+app.get('/api/history', (req, res) => {
+  const { from, to, table } = req.query;
+  let bills = db.get('bills').value();
+
+  if (from) {
+    const fromDate = new Date(from);
+    bills = bills.filter(b => new Date(b.time) >= fromDate);
+  }
+  if (to) {
+    // include the whole "to" day
+    const toDate = new Date(to);
+    toDate.setHours(23, 59, 59, 999);
+    bills = bills.filter(b => new Date(b.time) <= toDate);
+  }
+  if (table) {
+    bills = bills.filter(b => String(b.table) === String(table));
+  }
+
+  bills = bills.slice().sort((a, b) => new Date(b.time) - new Date(a.time));
+  res.json(bills);
+});
+
+// Best-selling items analytics, derived from all bills (optionally filtered by date range)
+app.get('/api/analytics/top-items', (req, res) => {
+  const { from, to } = req.query;
+  let bills = db.get('bills').value();
+
+  if (from) {
+    const fromDate = new Date(from);
+    bills = bills.filter(b => new Date(b.time) >= fromDate);
+  }
+  if (to) {
+    const toDate = new Date(to);
+    toDate.setHours(23, 59, 59, 999);
+    bills = bills.filter(b => new Date(b.time) <= toDate);
+  }
+
+  const counts = {};
+  bills.forEach(bill => {
+    bill.items.forEach(item => {
+      if (!counts[item.name]) counts[item.name] = { name: item.name, qty: 0, revenue: 0 };
+      counts[item.name].qty += item.qty;
+      counts[item.name].revenue += item.price * item.qty;
+    });
+  });
+
+  const ranked = Object.values(counts).sort((a, b) => b.qty - a.qty);
+  res.json(ranked);
+});
+
+// Generate QR codes for all tables
+app.get('/api/qrcodes', async (req, res) => {
+  const { tables = 25, baseUrl = `http://localhost:${PORT}` } = req.query;
+  const qrs = [];
+  for (let i = 1; i <= parseInt(tables); i++) {
+    const url = `${baseUrl}/menu?table=${i}`;
+    const dataUrl = await QRCode.toDataURL(url, { width: 200, margin: 1 });
+    qrs.push({ table: i, url, qr: dataUrl });
+  }
+  res.json(qrs);
+});
+
+// Serve page routes
+app.get('/', (req, res) => res.redirect('/dashboard'));
+app.get('/menu', (req, res) => res.sendFile(path.join(__dirname, 'public/menu.html')));
+app.get('/dashboard', (req, res) => res.sendFile(path.join(__dirname, 'public/dashboard.html')));
+app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'public/admin.html')));
+app.get('/qrcodes', (req, res) => res.sendFile(path.join(__dirname, 'public/qrcodes.html')));
+app.get('/bill', (req, res) => res.sendFile(path.join(__dirname, 'public/bill.html')));
+app.get('/history', (req, res) => res.sendFile(path.join(__dirname, 'public/history.html')));
+app.get('/analytics', (req, res) => res.sendFile(path.join(__dirname, 'public/analytics.html')));
+
+app.listen(PORT, () => {
+  console.log(`\n☕ The Brewtique is running at http://localhost:${PORT}`);
+  console.log(`   Menu:      http://localhost:${PORT}/menu?table=1`);
+  console.log(`   Dashboard: http://localhost:${PORT}/dashboard`);
+  console.log(`   Admin:     http://localhost:${PORT}/admin`);
+  console.log(`   QR Codes:  http://localhost:${PORT}/qrcodes\n`);
+});

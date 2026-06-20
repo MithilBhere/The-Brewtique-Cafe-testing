@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Brewtique – Best Sellers</title>
+<style>
+  :root {
+    --bg: #1A0F0A;
+    --surface: #241510;
+    --card: #2E1C12;
+    --border: #3D2318;
+    --text: #F5EDE6;
+    --muted: #9A7060;
+    --accent: #C8651A;
+    --accent-soft: rgba(200,101,26,0.15);
+    --gold: #F0B840;
+    --silver: #C4C4C4;
+    --bronze: #C8804A;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .logo { font-size: 18px; font-weight: 700; font-family: Georgia, serif; }
+  .logo span { color: var(--accent); }
+  .nav-link { font-size: 13px; color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 8px; }
+  .nav-link:hover { color: var(--text); background: var(--card); }
+
+  .container { max-width: 720px; margin: 0 auto; padding: 24px; }
+
+  .filters { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 20px; display: grid; grid-template-columns: 1fr 1fr auto; gap: 10px; align-items: end; }
+  .filter-field label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 6px; }
+  .filter-field input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; }
+  .filter-field input:focus { outline: none; border-color: var(--accent); }
+  .btn { background: var(--accent); color: white; border: none; border-radius: 8px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; height: fit-content; }
+  .btn:hover { background: #A8510F; }
+  .btn-clear { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-clear:hover { background: var(--card); color: var(--text); }
+
+  .chart-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 20px; margin-bottom: 20px; }
+  .chart-title { font-size: 13px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 16px; }
+  .bar-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .bar-rank { font-size: 12px; color: var(--muted); width: 18px; text-align: right; }
+  .bar-name { font-size: 13px; width: 110px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-track { flex: 1; background: var(--bg); border-radius: 6px; height: 22px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; background: var(--accent); border-radius: 6px; transition: width 0.4s ease; display: flex; align-items: center; justify-content: flex-end; padding-right: 8px; }
+  .bar-fill.gold { background: var(--gold); }
+  .bar-fill.silver { background: var(--silver); }
+  .bar-fill.bronze { background: var(--bronze); }
+  .bar-qty { font-size: 11px; font-weight: 700; color: var(--bg); }
+
+  .list-card { background: var(--card); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+  .list-row { display: flex; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border); gap: 12px; }
+  .list-row:last-child { border-bottom: none; }
+  .list-rank { font-size: 14px; font-weight: 700; width: 24px; color: var(--muted); }
+  .list-rank.top1 { color: var(--gold); }
+  .list-rank.top2 { color: var(--silver); }
+  .list-rank.top3 { color: var(--bronze); }
+  .list-info { flex: 1; }
+  .list-name { font-size: 14px; font-weight: 600; }
+  .list-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .list-qty { font-size: 15px; font-weight: 700; color: var(--accent); }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty-state .icon { font-size: 40px; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">The Brew<span>tique</span> — Best Sellers</div>
+  <div style="display:flex;gap:8px;">
+    <a href="/history" class="nav-link">History</a>
+    <a href="/bill" class="nav-link">Billing</a>
+    <a href="/dashboard" class="nav-link">← Dashboard</a>
+  </div>
+</div>
+
+<div class="container">
+  <div class="filters">
+    <div class="filter-field">
+      <label>From date</label>
+      <input type="date" id="filter-from">
+    </div>
+    <div class="filter-field">
+      <label>To date</label>
+      <input type="date" id="filter-to">
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="loadAnalytics()">Filter</button>
+      <button class="btn btn-clear" onclick="clearFilters()">Clear</button>
+    </div>
+  </div>
+
+  <div class="chart-card">
+    <div class="chart-title">Top sellers by quantity</div>
+    <div id="chart-container"></div>
+  </div>
+
+  <div class="list-card" id="list-container"></div>
+</div>
+
+<script>
+async function loadAnalytics() {
+  const from = document.getElementById('filter-from').value;
+  const to = document.getElementById('filter-to').value;
+
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+
+  const res = await fetch(`/api/analytics/top-items?${params.toString()}`);
+  const items = await res.json();
+  renderChart(items);
+  renderList(items);
+}
+
+function clearFilters() {
+  document.getElementById('filter-from').value = '';
+  document.getElementById('filter-to').value = '';
+  loadAnalytics();
+}
+
+function renderChart(items) {
+  const container = document.getElementById('chart-container');
+  if (items.length === 0) {
+    container.innerHTML = `<div class="empty-state"><div class="icon">📊</div><p>No sales data yet.</p></div>`;
+    return;
+  }
+  const top10 = items.slice(0, 10);
+  const maxQty = top10[0].qty;
+  const medalClass = (i) => i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : '';
+
+  container.innerHTML = top10.map((item, i) => {
+    const widthPct = Math.max(8, Math.round((item.qty / maxQty) * 100));
+    return `<div class="bar-row">
+      <div class="bar-rank">${i + 1}</div>
+      <div class="bar-name">${item.name}</div>
+      <div class="bar-track">
+        <div class="bar-fill ${medalClass(i)}" style="width:${widthPct}%;">
+          <span class="bar-qty">${item.qty}</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function renderList(items) {
+  const container = document.getElementById('list-container');
+  if (items.length === 0) {
+    container.innerHTML = '';
+    return;
+  }
+  container.innerHTML = items.map((item, i) => {
+    const rankClass = i === 0 ? 'top1' : i === 1 ? 'top2' : i === 2 ? 'top3' : '';
+    return `<div class="list-row">
+      <div class="list-rank ${rankClass}">${i + 1}</div>
+      <div class="list-info">
+        <div class="list-name">${item.name}</div>
+        <div class="list-sub">₹${item.revenue} total revenue</div>
+      </div>
+      <div class="list-qty">${item.qty} sold</div>
+    </div>`;
+  }).join('');
+}
+
+loadAnalytics();
+</script>
+</body>
+</html>

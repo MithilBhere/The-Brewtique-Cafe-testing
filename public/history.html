@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>The Brewtique – Order History</title>
+<style>
+  :root {
+    --bg: #1A0F0A;
+    --surface: #241510;
+    --card: #2E1C12;
+    --border: #3D2318;
+    --text: #F5EDE6;
+    --muted: #9A7060;
+    --accent: #C8651A;
+    --accent-soft: rgba(200,101,26,0.15);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+
+  .topbar { background: var(--surface); border-bottom: 1px solid var(--border); padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+  .logo { font-size: 18px; font-weight: 700; font-family: Georgia, serif; }
+  .logo span { color: var(--accent); }
+  .nav-link { font-size: 13px; color: var(--muted); text-decoration: none; padding: 6px 12px; border-radius: 8px; }
+  .nav-link:hover { color: var(--text); background: var(--card); }
+
+  .container { max-width: 720px; margin: 0 auto; padding: 24px; }
+
+  .filters { background: var(--card); border: 1px solid var(--border); border-radius: 14px; padding: 16px; margin-bottom: 20px; display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 10px; align-items: end; }
+  .filter-field label { font-size: 11px; color: var(--muted); display: block; margin-bottom: 6px; }
+  .filter-field input { width: 100%; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; color: var(--text); font-size: 13px; }
+  .filter-field input:focus { outline: none; border-color: var(--accent); }
+  .btn { background: var(--accent); color: white; border: none; border-radius: 8px; padding: 9px 16px; font-size: 13px; font-weight: 600; cursor: pointer; height: fit-content; }
+  .btn:hover { background: #A8510F; }
+  .btn-clear { background: transparent; border: 1px solid var(--border); color: var(--muted); }
+  .btn-clear:hover { background: var(--card); color: var(--text); }
+
+  .summary-bar { display: flex; gap: 16px; padding: 14px 16px; background: var(--card); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px; }
+  .summary-stat { flex: 1; }
+  .summary-num { font-size: 22px; font-weight: 700; }
+  .summary-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }
+
+  .bill-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 16px; margin-bottom: 10px; }
+  .bill-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .bill-id-table { font-size: 14px; font-weight: 700; }
+  .bill-total { font-size: 16px; font-weight: 700; color: var(--accent); }
+  .bill-time-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .bill-time-display { font-size: 12px; color: var(--muted); }
+  .edit-time-btn { font-size: 11px; color: var(--accent); background: none; border: none; cursor: pointer; padding: 2px 6px; }
+  .edit-time-btn:hover { text-decoration: underline; }
+  .time-edit-row { display: none; align-items: center; gap: 8px; margin-bottom: 10px; }
+  .time-edit-row.show { display: flex; }
+  .time-edit-row input { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; color: var(--text); font-size: 12px; }
+  .time-edit-row button { font-size: 11px; padding: 6px 10px; border-radius: 6px; border: none; cursor: pointer; }
+  .save-time-btn { background: var(--accent); color: white; }
+  .cancel-time-btn { background: transparent; border: 1px solid var(--border) !important; color: var(--muted); }
+
+  .bill-items { font-size: 12px; color: var(--muted); line-height: 1.6; }
+  .bill-discount { font-size: 12px; color: #F0B840; margin-top: 4px; }
+
+  .empty-state { text-align: center; padding: 60px 20px; color: var(--muted); }
+  .empty-state .icon { font-size: 40px; margin-bottom: 10px; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="logo">The Brew<span>tique</span> — History</div>
+  <div style="display:flex;gap:8px;">
+    <a href="/analytics" class="nav-link">Best sellers</a>
+    <a href="/bill" class="nav-link">Billing</a>
+    <a href="/dashboard" class="nav-link">← Dashboard</a>
+  </div>
+</div>
+
+<div class="container">
+  <div class="filters">
+    <div class="filter-field">
+      <label>From date</label>
+      <input type="date" id="filter-from">
+    </div>
+    <div class="filter-field">
+      <label>To date</label>
+      <input type="date" id="filter-to">
+    </div>
+    <div class="filter-field">
+      <label>Table</label>
+      <input type="number" id="filter-table" placeholder="Any">
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn" onclick="loadHistory()">Filter</button>
+      <button class="btn btn-clear" onclick="clearFilters()">Clear</button>
+    </div>
+  </div>
+
+  <div class="summary-bar" id="summary-bar" style="display:none;">
+    <div class="summary-stat"><div class="summary-num" id="sum-count">0</div><div class="summary-label">Bills</div></div>
+    <div class="summary-stat"><div class="summary-num" id="sum-revenue">₹0</div><div class="summary-label">Revenue</div></div>
+    <div class="summary-stat"><div class="summary-num" id="sum-discount">₹0</div><div class="summary-label">Discounts given</div></div>
+  </div>
+
+  <div id="history-list"></div>
+</div>
+
+<script>
+async function loadHistory() {
+  const from = document.getElementById('filter-from').value;
+  const to = document.getElementById('filter-to').value;
+  const table = document.getElementById('filter-table').value;
+
+  const params = new URLSearchParams();
+  if (from) params.set('from', from);
+  if (to) params.set('to', to);
+  if (table) params.set('table', table);
+
+  const res = await fetch(`/api/history?${params.toString()}`);
+  const bills = await res.json();
+  renderHistory(bills);
+}
+
+function clearFilters() {
+  document.getElementById('filter-from').value = '';
+  document.getElementById('filter-to').value = '';
+  document.getElementById('filter-table').value = '';
+  loadHistory();
+}
+
+function renderHistory(bills) {
+  const list = document.getElementById('history-list');
+  const summaryBar = document.getElementById('summary-bar');
+
+  if (bills.length === 0) {
+    list.innerHTML = `<div class="empty-state"><div class="icon">🧾</div><p>No bills found for this filter.</p></div>`;
+    summaryBar.style.display = 'none';
+    return;
+  }
+
+  const totalRevenue = bills.reduce((s, b) => s + b.finalTotal, 0);
+  const totalDiscount = bills.reduce((s, b) => s + b.discountAmount, 0);
+  document.getElementById('sum-count').textContent = bills.length;
+  document.getElementById('sum-revenue').textContent = '₹' + totalRevenue;
+  document.getElementById('sum-discount').textContent = '₹' + totalDiscount;
+  summaryBar.style.display = 'flex';
+
+  list.innerHTML = bills.map(b => {
+    const dt = new Date(b.time);
+    const display = dt.toLocaleString('en-IN', { dateStyle: 'medium', timeStyle: 'short' });
+    const localInputVal = new Date(dt.getTime() - dt.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    const itemsText = b.items.map(i => `${i.qty}× ${i.name}`).join(', ');
+    const discountText = b.discountAmount > 0
+      ? `<div class="bill-discount">Discount applied: −₹${b.discountAmount} (${b.discountType === 'percent' ? b.discountValue + '%' : 'flat'})</div>`
+      : '';
+    return `<div class="bill-card">
+      <div class="bill-top">
+        <div class="bill-id-table">Bill #${b.id} · Table ${b.table}</div>
+        <div class="bill-total">₹${b.finalTotal}</div>
+      </div>
+      <div class="bill-time-row" id="time-display-${b.id}">
+        <span class="bill-time-display">${display}</span>
+        <button class="edit-time-btn" onclick="toggleEditTime(${b.id})">Edit</button>
+      </div>
+      <div class="time-edit-row" id="time-edit-${b.id}">
+        <input type="datetime-local" id="time-input-${b.id}" value="${localInputVal}">
+        <button class="save-time-btn" onclick="saveTime(${b.id})">Save</button>
+        <button class="cancel-time-btn" onclick="toggleEditTime(${b.id})">Cancel</button>
+      </div>
+      <div class="bill-items">${itemsText}</div>
+      ${discountText}
+    </div>`;
+  }).join('');
+}
+
+function toggleEditTime(id) {
+  document.getElementById(`time-display-${id}`).classList.toggle('show');
+  const editRow = document.getElementById(`time-edit-${id}`);
+  editRow.classList.toggle('show');
+  document.getElementById(`time-display-${id}`).style.display = editRow.classList.contains('show') ? 'none' : 'flex';
+}
+
+async function saveTime(id) {
+  const newTime = document.getElementById(`time-input-${id}`).value;
+  if (!newTime) return;
+  await fetch(`/api/bill/${id}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ time: new Date(newTime).toISOString() })
+  });
+  loadHistory();
+}
+
+loadHistory();
+</script>
+</body>
+</html>
