@@ -91,7 +91,11 @@
 
 <div class="topbar">
   <div class="logo">The Brew<span>tique</span> — Billing</div>
-  <a href="/dashboard" class="nav-link">← Dashboard</a>
+  <div style="display:flex;gap:8px;">
+    <a href="/history" class="nav-link">History</a>
+    <a href="/analytics" class="nav-link">Best sellers</a>
+    <a href="/dashboard" class="nav-link">← Dashboard</a>
+  </div>
 </div>
 
 <div class="container">
@@ -109,6 +113,11 @@
     <div class="summary-row"><span>Subtotal</span><span id="sum-subtotal">₹0</span></div>
     <div class="summary-row muted" id="sum-discount-row" style="display:none;"><span id="sum-discount-label">Discount</span><span id="sum-discount">−₹0</span></div>
     <div class="summary-row total"><span>Total payable</span><span id="sum-total">₹0</span></div>
+
+    <div class="discount-section">
+      <div class="discount-label">Bill date & time</div>
+      <input type="datetime-local" id="bill-time" style="margin-bottom:4px;">
+    </div>
 
     <div class="discount-section">
       <div class="discount-label">Apply discount</div>
@@ -145,6 +154,11 @@ async function loadOrders() {
   const res = await fetch(`/api/bill/${table}`);
   currentOrders = await res.json();
   selectedIds = new Set(currentOrders.map(o => o.id));
+
+  // Default bill time to "now" in datetime-local format
+  const now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('bill-time').value = now.toISOString().slice(0, 16);
 
   renderOrders();
   recalculate();
@@ -228,6 +242,8 @@ async function generateBill() {
   if (selected.length === 0) return;
 
   const discountValue = parseFloat(document.getElementById('discount-value').value) || 0;
+  const billTimeInput = document.getElementById('bill-time').value;
+  const billTime = billTimeInput ? new Date(billTimeInput).toISOString() : new Date().toISOString();
 
   const res = await fetch('/api/bill', {
     method: 'POST',
@@ -236,7 +252,8 @@ async function generateBill() {
       table: currentTable,
       orderIds: selected.map(o => o.id),
       discountType,
-      discountValue
+      discountValue,
+      time: billTime
     })
   });
   const data = await res.json();
